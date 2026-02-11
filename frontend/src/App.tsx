@@ -6,8 +6,12 @@ import { DashboardPage } from './components/DashboardPage';
 import { StudyGroupsPage } from './components/StudyGroupsPage';
 import { SoloStudyPage } from './components/SoloStudyPage';
 import { FriendsPage } from './components/FriendsPage';
+import { FriendDetailPage } from './components/FriendDetailPage';
 import { SettingsPage } from './components/SettingsPage';
+import { ProfilePage } from './components/ProfilePage';
+import { StudyRoomPage } from './components/StudyRoomPage';
 import { Toaster } from './components/ui/sonner';
+import { Avatar, AvatarFallback, AvatarImage } from './components/ui/avatar';
 import { 
   LayoutDashboard, 
   Users, 
@@ -19,12 +23,38 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-type Page = 'login' | 'register' | 'dashboard' | 'study-groups' | 'solo-study' | 'friends' | 'settings';
+type Page = 'login' | 'register' | 'dashboard' | 'study-groups' | 'solo-study' | 'friends' | 'settings' | 'profile' | 'friend-detail' | 'room';
+
+const APP_PAGES: Page[] = ['dashboard', 'study-groups', 'solo-study', 'friends', 'settings'];
+
+function getPageFromHash(): Page {
+  const hash = window.location.hash.slice(1);
+  if (hash.startsWith('room-')) return 'room';
+  if (APP_PAGES.includes(hash as Page)) return hash as Page;
+  return 'dashboard';
+}
+
+function getGroupIdFromHash(): string | null {
+  const hash = window.location.hash.slice(1);
+  if (hash.startsWith('room-')) return hash.slice(5);
+  return null;
+}
 
 interface User {
   id: string;
   email: string;
   username: string;
+  userId?: string;
+  category?: string;
+  profileImageUrl?: string;
+}
+
+interface Friend {
+  id: string;
+  username: string;
+  email: string;
+  category: string;
+  profileImageUrl?: string;
 }
 
 export default function App() {
@@ -32,11 +62,44 @@ export default function App() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [prototypeMode, setPrototypeMode] = useState(false);
+  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check for existing session
     checkSession();
   }, []);
+
+  useEffect(() => {
+    if (accessToken && currentPage === 'profile') {
+      fetchProfile();
+    }
+  }, [accessToken, currentPage]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    const syncHash = () => {
+      const page = getPageFromHash();
+      setCurrentPage(page);
+      setCurrentGroupId(page === 'room' ? getGroupIdFromHash() : null);
+    };
+    syncHash();
+    window.addEventListener('hashchange', syncHash);
+    return () => window.removeEventListener('hashchange', syncHash);
+  }, [accessToken]);
+
+  const navigateTo = (page: Page) => {
+    if (page === 'room') return;
+    if (APP_PAGES.includes(page)) window.location.hash = page;
+    setCurrentPage(page);
+    setCurrentGroupId(null);
+  };
+
+  const navigateToRoom = (groupId: string) => {
+    window.location.hash = `room-${groupId}`;
+    setCurrentPage('room');
+    setCurrentGroupId(groupId);
+  };
 
   const checkSession = async () => {
     const savedToken = localStorage.getItem('accessToken');
@@ -50,7 +113,9 @@ export default function App() {
         if (data.user) {
           setAccessToken(savedToken);
           setUser(data.user);
-          setCurrentPage('dashboard');
+          const page = getPageFromHash();
+          setCurrentPage(page);
+          setCurrentGroupId(page === 'room' ? getGroupIdFromHash() : null);
         } else {
           localStorage.removeItem('accessToken');
         }
@@ -61,6 +126,7 @@ export default function App() {
     } else {
       setCurrentPage('login');
     }
+    setSessionChecked(true);
   };
 
   const handleLogin = async (email: string, password: string) => {
@@ -82,7 +148,7 @@ export default function App() {
         setAccessToken(data.accessToken);
         setUser(data.user);
         localStorage.setItem('accessToken', data.accessToken);
-        setCurrentPage('dashboard');
+        navigateTo('dashboard');
         toast.success('Welcome back!');
       }
     } catch (error) {
@@ -123,6 +189,41 @@ export default function App() {
     setCurrentPage('login');
   };
 
+  const fetchProfile = async () => {
+    try {
+      const response = await fetch(`${apiBase}/settings`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const data = await response.json();
+      if (data.settings) {
+        setUser((prev) => (prev ? { ...prev, ...data.settings } : prev));
+      }
+    } catch (error) {
+      console.error('Failed to load profile:', error);
+    }
+  };
+
+  const getInitials = (name?: string, fallback?: string) => {
+    const base = (name || fallback || 'U').trim();
+    return base
+      .split(' ')
+      .map((chunk) => chunk[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+  };
+
+  if (!sessionChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f5f5f7]">
+        <div className="flex flex-col items-center gap-3">
+          <GraduationCap className="size-10 text-teal-600 animate-pulse" />
+          <p className="text-sm text-gray-500">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!accessToken) {
     return (
       <>
@@ -157,7 +258,7 @@ export default function App() {
         {/* Navigation */}
         <nav className="flex-1 px-4 space-y-1">
           <button
-            onClick={() => setCurrentPage('dashboard')}
+            onClick={() => navigateTo('dashboard')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${
               currentPage === 'dashboard'
                 ? 'bg-gray-100 text-gray-900'
@@ -169,7 +270,7 @@ export default function App() {
           </button>
           
           <button
-            onClick={() => setCurrentPage('study-groups')}
+            onClick={() => navigateTo('study-groups')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${
               currentPage === 'study-groups'
                 ? 'bg-gray-100 text-gray-900'
@@ -181,7 +282,7 @@ export default function App() {
           </button>
           
           <button
-            onClick={() => setCurrentPage('solo-study')}
+            onClick={() => navigateTo('solo-study')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${
               currentPage === 'solo-study'
                 ? 'bg-gray-100 text-gray-900'
@@ -193,7 +294,7 @@ export default function App() {
           </button>
           
           <button
-            onClick={() => setCurrentPage('friends')}
+            onClick={() => navigateTo('friends')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${
               currentPage === 'friends'
                 ? 'bg-gray-100 text-gray-900'
@@ -208,7 +309,7 @@ export default function App() {
         {/* Bottom Section */}
         <div className="px-4 pb-4 space-y-1">
           <button
-            onClick={() => setCurrentPage('settings')}
+            onClick={() => navigateTo('settings')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${
               currentPage === 'settings'
                 ? 'bg-gray-100 text-gray-900'
@@ -232,6 +333,39 @@ export default function App() {
             🎨 PROTOTYPE MODE
           </div>
         )}
+
+        <div className="flex items-center justify-end px-6 pt-4">
+          <button
+            onClick={() => setCurrentPage('profile')}
+            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+            title="View profile"
+          >
+            <Avatar className="size-9">
+              {user?.profileImageUrl && (
+                <AvatarImage
+                  src={user.profileImageUrl}
+                  alt={user.username || 'Profile'}
+                  className="object-cover"
+                  style={{ objectPosition: 'center' }}
+                />
+              )}
+              <AvatarFallback
+                className="bg-gray-200 text-gray-700 text-xs font-semibold"
+                style={
+                  user?.profileImageUrl
+                    ? {
+                        backgroundImage: `url(${user.profileImageUrl})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center'
+                      }
+                    : undefined
+                }
+              >
+                {!user?.profileImageUrl ? getInitials(user?.username, user?.email) : null}
+              </AvatarFallback>
+            </Avatar>
+          </button>
+        </div>
         
         <main className="p-6">
           {currentPage === 'dashboard' && (
@@ -241,14 +375,44 @@ export default function App() {
             <StudyGroupsPage
               accessToken={accessToken}
               userId={user?.id || ''}
+              currentUserUsername={user?.username}
+              onJoinRoom={navigateToRoom}
+            />
+          )}
+          {currentPage === 'room' && currentGroupId && (
+            <StudyRoomPage
+              groupId={currentGroupId}
+              accessToken={accessToken}
+              onBack={() => navigateTo('study-groups')}
             />
           )}
           {currentPage === 'solo-study' && <SoloStudyPage />}
           {currentPage === 'friends' && (
-            <FriendsPage accessToken={accessToken} />
+            <FriendsPage
+              accessToken={accessToken}
+              onViewFriend={(friend) => {
+                setSelectedFriend(friend);
+                setCurrentPage('friend-detail');
+              }}
+            />
           )}
           {currentPage === 'settings' && (
-            <SettingsPage accessToken={accessToken} />
+            <SettingsPage
+              accessToken={accessToken}
+              onProfileUpdate={(nextProfile) =>
+                setUser((prev) => (prev ? { ...prev, ...nextProfile } : prev))
+              }
+            />
+          )}
+          {currentPage === 'profile' && user && (
+            <ProfilePage accessToken={accessToken} user={user} />
+          )}
+          {currentPage === 'friend-detail' && selectedFriend && (
+            <FriendDetailPage
+              accessToken={accessToken}
+              friend={selectedFriend}
+              onBack={() => setCurrentPage('friends')}
+            />
           )}
         </main>
       </div>
